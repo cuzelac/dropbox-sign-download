@@ -20,6 +20,7 @@
 require 'json'
 require 'fileutils'
 require 'uri'
+require 'net/http'
 
 class FileDownloadStatus
   attr_reader :id, :title, :filename, :state, :error_message
@@ -71,20 +72,13 @@ class HelloSignDownloader
   DEFAULT_INITIAL_SLEEP = 1
 
   attr_reader :api_key, :base_url, :page_size, :output_folder, :max_retries, :initial_sleep, :statuses
-  attr_accessor :http_client
-
-  def self.default_http_client
-    require 'httparty'
-    HTTParty
-  end
 
   def initialize(api_key: ENV['HELLOSIGN_API_KEY'] || 'PUT_YOUR_API_KEY_HERE',
                  base_url: DEFAULT_BASE_URL,
                  page_size: DEFAULT_PAGE_SIZE,
                  output_folder: nil,
                  max_retries: DEFAULT_MAX_RETRIES,
-                 initial_sleep: DEFAULT_INITIAL_SLEEP,
-                 http_client: self.class.default_http_client)
+                 initial_sleep: DEFAULT_INITIAL_SLEEP)
     @timestamp    = Time.now.to_i
     @output_folder = output_folder || File.expand_path("./signed_docs_#{@timestamp}")
     @api_key       = api_key
@@ -92,7 +86,6 @@ class HelloSignDownloader
     @page_size     = page_size
     @max_retries   = max_retries
     @initial_sleep = initial_sleep
-    @http_client   = http_client
     @auth          = { username: @api_key, password: '' }
     FileUtils.mkdir_p(@output_folder)
     @statuses      = []
@@ -113,7 +106,6 @@ class HelloSignDownloader
     puts
 
     @statuses.clear
-    
     all_requests.each_with_index do |req, idx|
       status = FileDownloadStatus.new(id: req[:id], title: req[:title])
       @statuses << status
@@ -149,7 +141,7 @@ class HelloSignDownloader
 
   def fetch_total_pages
     puts "Fetching first page of signature requests to get pagination info..."
-    first_response = http_client.get(
+    first_response = net_http_get(
       "#{base_url}/signature_request/list",
       basic_auth: @auth,
       query: { page: 1, page_size: page_size }
@@ -167,7 +159,7 @@ class HelloSignDownloader
     all_requests = []
     (1..total_pages).each do |page_num|
       print "Fetching page #{page_num}/#{total_pages}... "
-      resp = http_client.get(
+      resp = net_http_get(
         "#{base_url}/signature_request/list",
         basic_auth: @auth,
         query: { page: page_num, page_size: page_size }
@@ -199,7 +191,7 @@ class HelloSignDownloader
     sleep_time = initial_sleep
     while retries <= max_retries
       begin
-        response = http_client.get(url, basic_auth: @auth, query: params)
+        response = net_http_get(url, basic_auth: @auth, query: params)
         if response.code == 429
           if retries < max_retries
             warn "Rate limit hit (429). Retrying in #{sleep_time}s..."
@@ -224,6 +216,19 @@ class HelloSignDownloader
         end
       end
     end
+  end
+
+  def net_http_get(url, basic_auth: nil, query: {})
+    uri = URI(url)
+    uri.query = URI.encode_www_form(query) unless query.empty?
+    req = Net::HTTP::Get.new(uri)
+    if basic_auth
+      req.basic_auth(basic_auth[:username], basic_auth[:password])
+    end
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == 'https')
+    response = http.request(req)
+    Struct.new(:code, :body).new(response.code.to_i, response.body)
   end
 
   def print_status_summary
