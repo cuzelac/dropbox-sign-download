@@ -2,31 +2,52 @@
 #
 # download_all_signed_docs_with_titles.rb
 #
-# Uses HTTParty to:
-#   1) Fetch every signature_request_id (along with its title) via the HelloSign API (paginated)
-#   2) Download the combined PDF for each request
-#   3) Save each PDF using a sanitized version of the "title" (envelope name)
+# This script downloads all signed documents from your Dropbox Sign (formerly HelloSign) account.
+# It saves each document with a readable filename and keeps a status log of every download, so you can easily see which files succeeded or failed.
 #
-# Adds retry logic with exponential backoff for rate limit (HTTP 429) responses.
+# == Features
+# - Downloads every signed document from your Dropbox Sign account.
+# - Names each file using the document's title (or envelope name).
+# - Handles rate limits (HTTP 429) with automatic retries.
+# - Keeps a status log (JSON) of all downloads, including errors.
+# - No external Ruby gems required—just standard Ruby!
 #
-# This script is compatible with Ruby 2.7.0.
+# == Usage
+#   $ export HELLOSIGN_API_KEY=your_api_key_here
+#   $ ruby download_all_signed_docs.rb
 #
-# Usage:
-#   $ chmod +x download_all_signed_docs_with_titles.rb
-#   $ ./download_all_signed_docs_with_titles.rb
-#
-# Make sure HELLOSIGN_API_KEY is set in your environment before running.
+# See README.md for more details.
 
 require 'json'
 require 'fileutils'
 require 'uri'
 require 'net/http'
 
+##
+# Represents the download status and state for a single file/request.
+#
+# Tracks the signature request ID, title, filename, current state, and any error message.
+# Used by HelloSignDownloader to maintain a status log for all downloads.
 class FileDownloadStatus
-  attr_reader :id, :title, :filename, :state, :error_message
+  # The signature request ID
+  attr_reader :id
+  # The title of the document/envelope
+  attr_reader :title
+  # The full path to the saved file (if successful)
+  attr_reader :filename
+  # The current state (:pending, :downloading, :success, :error, :skipped)
+  attr_reader :state
+  # The error message, if any
+  attr_reader :error_message
 
+  # Possible states for a file download
   STATES = [:pending, :downloading, :success, :error, :skipped]
 
+  ##
+  # Create a new FileDownloadStatus
+  #
+  # id::    The signature request ID
+  # title:: The document/envelope title
   def initialize(id:, title:)
     @id = id
     @title = title
@@ -35,25 +56,38 @@ class FileDownloadStatus
     @error_message = nil
   end
 
+  ##
+  # Mark the file as starting download
   def start_download
     @state = :downloading
   end
 
+  ##
+  # Mark the file as successfully downloaded
+  # filename:: The path to the saved file
   def mark_success(filename)
     @state = :success
     @filename = filename
   end
 
+  ##
+  # Mark the file as failed with an error
+  # error_message:: The error message
   def mark_error(error_message)
     @state = :error
     @error_message = error_message
   end
 
+  ##
+  # Mark the file as skipped
+  # reason:: The reason for skipping
   def skip(reason)
     @state = :skipped
     @error_message = reason
   end
 
+  ##
+  # Convert the status to a hash for JSON serialization
   def to_h
     {
       id: @id,
@@ -65,14 +99,44 @@ class FileDownloadStatus
   end
 end
 
+##
+# Downloads all signed documents from Dropbox Sign and maintains a status log.
+#
+# Usage:
+#   downloader = HelloSignDownloader.new
+#   downloader.download_all_signed_docs
+#
+# See README.md for setup and usage instructions.
 class HelloSignDownloader
   DEFAULT_BASE_URL      = 'https://api.hellosign.com/v3'
   DEFAULT_PAGE_SIZE     = 100
   DEFAULT_MAX_RETRIES   = 5
   DEFAULT_INITIAL_SLEEP = 1
 
-  attr_reader :api_key, :base_url, :page_size, :output_folder, :max_retries, :initial_sleep, :statuses
+  # The API key used for authentication
+  attr_reader :api_key
+  # The base URL for the Dropbox Sign API
+  attr_reader :base_url
+  # The number of requests per page
+  attr_reader :page_size
+  # The output folder for downloaded files
+  attr_reader :output_folder
+  # The maximum number of retries for rate limits
+  attr_reader :max_retries
+  # The initial sleep time for exponential backoff
+  attr_reader :initial_sleep
+  # The array of FileDownloadStatus objects
+  attr_reader :statuses
 
+  ##
+  # Create a new HelloSignDownloader
+  #
+  # api_key::      Dropbox Sign API key (default: ENV['HELLOSIGN_API_KEY'])
+  # base_url::     API base URL (default: DEFAULT_BASE_URL)
+  # page_size::    Number of requests per page (default: DEFAULT_PAGE_SIZE)
+  # output_folder::Output folder for downloads (default: ./signed_docs_<timestamp>)
+  # max_retries::  Max retries for rate limits (default: DEFAULT_MAX_RETRIES)
+  # initial_sleep::Initial sleep for backoff (default: DEFAULT_INITIAL_SLEEP)
   def initialize(api_key: ENV['HELLOSIGN_API_KEY'] || 'PUT_YOUR_API_KEY_HERE',
                  base_url: DEFAULT_BASE_URL,
                  page_size: DEFAULT_PAGE_SIZE,
@@ -91,6 +155,10 @@ class HelloSignDownloader
     @statuses      = []
   end
 
+  ##
+  # Main method to download all signed documents and print a summary.
+  #
+  # Fetches all signature requests, downloads each PDF, and writes a status log.
   def download_all_signed_docs
     puts "Using HelloSign API Key: #{api_key[0..3]}..."
     puts "Output folder: #{output_folder}"
@@ -139,6 +207,10 @@ class HelloSignDownloader
     print_status_summary
   end
 
+  ##
+  # Fetch the total number of pages of signature requests.
+  #
+  # Returns the number of pages as an integer.
   def fetch_total_pages
     puts "Fetching first page of signature requests to get pagination info..."
     first_response = net_http_get(
@@ -155,6 +227,11 @@ class HelloSignDownloader
     list_info['num_pages'].to_i
   end
 
+  ##
+  # Collect all signature request IDs and titles from all pages.
+  #
+  # total_pages:: The total number of pages to fetch
+  # Returns an array of hashes: [{ id: ..., title: ... }, ...]
   def collect_all_requests(total_pages)
     all_requests = []
     (1..total_pages).each do |page_num|
@@ -179,6 +256,12 @@ class HelloSignDownloader
     all_requests
   end
 
+  ##
+  # Sanitize a string to be a safe filename.
+  #
+  # raw_title::   The original title string
+  # fallback_id:: The fallback string if the title is empty
+  # Returns a safe filename string.
   def sanitize_filename(raw_title, fallback_id)
     name = raw_title.to_s.strip.empty? ? fallback_id : raw_title.dup
     safe = name.gsub(/[^0-9A-Za-z.\-]/, '_')
@@ -186,6 +269,12 @@ class HelloSignDownloader
     safe
   end
 
+  ##
+  # Download a file with retry logic for rate limits and exceptions.
+  #
+  # url::    The URL to download
+  # params:: Query parameters for the request
+  # Returns a response-like object with .code and .body
   def download_with_retry(url, params)
     retries = 0
     sleep_time = initial_sleep
@@ -218,6 +307,13 @@ class HelloSignDownloader
     end
   end
 
+  ##
+  # Perform a GET request using Net::HTTP with optional basic auth and query params.
+  #
+  # url::        The URL to request
+  # basic_auth:: Hash with :username and :password (optional)
+  # query::      Hash of query parameters (optional)
+  # Returns a Struct with .code (Integer) and .body (String)
   def net_http_get(url, basic_auth: nil, query: {})
     uri = URI(url)
     uri.query = URI.encode_www_form(query) unless query.empty?
@@ -231,6 +327,8 @@ class HelloSignDownloader
     Struct.new(:code, :body).new(response.code.to_i, response.body)
   end
 
+  ##
+  # Print a summary of all file download statuses to the console.
   def print_status_summary
     puts "\nSummary of file downloads:"
     @statuses.each_with_index do |status, idx|
@@ -238,6 +336,8 @@ class HelloSignDownloader
     end
   end
 
+  ##
+  # Write the statuses to a JSON file in the output folder.
   def write_statuses_to_json
     filename = File.join(@output_folder, "download_status_#{@timestamp}.json")
     data = @statuses.map(&:to_h)
@@ -249,6 +349,8 @@ class HelloSignDownloader
 end
 
 if __FILE__ == $0
+  # Entry point for running the script from the command line.
+  # Downloads all signed documents and writes a status log, even if interrupted.
   downloader = HelloSignDownloader.new
   begin
     downloader.download_all_signed_docs
