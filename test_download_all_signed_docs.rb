@@ -55,7 +55,7 @@ class TestHelloSignDownloader < Minitest::Test
   def test_sanitize_filename
     assert_equal 'Test_Doc', @downloader.sanitize_filename('Test Doc', 'fallback')
     assert_equal 'fallback', @downloader.sanitize_filename('', 'fallback')
-    assert_equal 'abc123', @downloader.sanitize_filename(nil, 'abc123')
+    assert_equal 'fallback', @downloader.sanitize_filename(nil, 'fallback')
     assert_equal 'A_B_C', @downloader.sanitize_filename('A/B:C', 'fallback')
   end
 
