@@ -241,10 +241,6 @@ class HelloSignDownloader
     end
     puts "Status written to #{filename}"
   end
-
-  def statuses
-    @statuses
-  end
 end
 
 if __FILE__ == $0
@@ -258,5 +254,3 @@ if __FILE__ == $0
     downloader.write_statuses_to_json
   end
 end
-
-# End of script
