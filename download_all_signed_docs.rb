@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 #
-# download_all_signed_docs_with_titles.rb
+# download_all_signed_docs.rb
 #
 # This script downloads all signed documents from your Dropbox Sign (formerly HelloSign) account.
 # It saves each document with a readable filename and keeps a status log of every download, so you can easily see which files succeeded or failed.
