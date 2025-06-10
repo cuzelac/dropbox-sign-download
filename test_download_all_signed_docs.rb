@@ -53,10 +53,11 @@ class TestHelloSignDownloader < Minitest::Test
   end
 
   def test_sanitize_filename
-    assert_equal 'Test_Doc', @downloader.sanitize_filename('Test Doc', 'fallback')
-    assert_equal 'fallback', @downloader.sanitize_filename('', 'fallback')
-    assert_equal 'fallback', @downloader.sanitize_filename(nil, 'fallback')
-    assert_equal 'A_B_C', @downloader.sanitize_filename('A/B:C', 'fallback')
+    assert_equal 'Test_Doc_dummyid', @downloader.sanitized_filename('Test Doc', 'dummyid')
+    assert_equal 'dummyid', @downloader.sanitized_filename('', 'dummyid')
+    assert_equal 'dummyid', @downloader.sanitized_filename(nil, 'dummyid')
+    assert_equal 'A_B_C_dummyid', @downloader.sanitized_filename('A/B:C', 'dummyid')
+    assert_equal 'dummyid', @downloader.sanitized_filename('   ', 'dummyid')
   end
 
   def test_net_http_get_success
@@ -91,4 +92,4 @@ class TestHelloSignDownloader < Minitest::Test
     assert_equal 200, result.code
     assert_equal 'ok', result.body
   end
-end 
+end

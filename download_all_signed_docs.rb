@@ -187,7 +187,7 @@ class HelloSignDownloader
           { file_type: 'pdf' }
         )
         if file_resp.code == 200
-          filename_base = sanitize_filename(raw_title, sig_id)
+          filename_base = sanitized_filename(raw_title, sig_id)
           filename = File.join(output_folder, "#{filename_base}.pdf")
           File.open(filename, 'wb') { |f| f.write(file_resp.body) }
           status.mark_success(filename)
@@ -260,12 +260,15 @@ class HelloSignDownloader
   # Sanitize a string to be a safe filename.
   #
   # raw_title::   The original title string
-  # fallback_id:: The fallback string if the title is empty
+  # id:: The fallback string if the title is empty
   # Returns a safe filename string.
-  def sanitize_filename(raw_title, fallback_id)
-    name = raw_title.to_s.strip.empty? ? fallback_id : raw_title.dup
+  def sanitized_filename(raw_title, id)
+    if raw_title.to_s.strip.empty?
+      name = id
+    else
+      name = raw_title.dup + '_' + id
+    end
     safe = name.gsub(/[^0-9A-Za-z.\-]/, '_')
-    safe = fallback_id if safe.strip.empty?
     safe
   end
 
